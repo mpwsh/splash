@@ -15,6 +15,9 @@ use std::time::Duration;
 use tokio::{io, select, time};
 use tracing_subscriber::EnvFilter;
 use warp::Filter;
+use chrono::{DateTime, Utc};
+use ws::{channel, server};
+mod ws;
 
 #[derive(NetworkBehaviour)]
 struct SplashBehaviour {
@@ -53,6 +56,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
+    let (sender, receiver) = tokio::sync::mpsc::channel(100);
+    if let Some(address) = opt.offer_webhook.clone() {
+        let server = server::WebSocket::run(&address).await;
+
+        tokio::spawn(async {
+            channel::transmit(server, receiver).await.unwrap();
+        });
+    }
     let mut swarm = libp2p::SwarmBuilder::with_existing_identity(id_keys)
         .with_tokio()
         .with_tcp(
@@ -212,7 +223,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             "Received Offer: {}",
                             msg_str,
                         );
-
+                        let ws_str = msg_str.clone();
                         if let Some(ref endpoint_url) = opt.offer_hook {
                             let endpoint_url_clone = endpoint_url.clone();
                             tokio::spawn(async move {
@@ -221,6 +232,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             });
                         }
+                        if let Some(ref _address) = opt.offer_webhook.clone() {
+                            let now: DateTime<Utc> = Utc::now();
+                            let ws_data = ws::channel::Data {
+                                        offer: ws_str.clone(),
+                                        ts: now.format("%Y-%m-%d %H:%M:%S").to_string(),
+                            };
+                                if let Err(e) = sender.send(ws_data).await {
+                                    eprintln!("Error transmitting to offer webhook address: {}", e);
+                                }
+                        };
                     }
                 },
                 SwarmEvent::Behaviour(SplashBehaviourEvent::Identify(identify::Event::Received { info: identify::Info { observed_addr, listen_addrs, .. }, peer_id })) => {
@@ -309,4 +330,10 @@ struct Opt {
         value_name = "HOST:PORT"
     )]
     listen_offer_submission: Option<String>,
+    #[clap(
+        long,
+        help = "Start a Websocket server to transmit offers",
+        value_name = "HOST:PORT"
+    )]
+    offer_webhook: Option<String>,
 }
