@@ -1,6 +1,6 @@
 use serde_json::json;
-use tokio::sync::mpsc;
 use std::error::Error;
+use tokio::sync::mpsc;
 
 use super::server::WebSocket;
 
@@ -9,7 +9,10 @@ pub struct Data {
     pub ts: String,
 }
 
-pub async fn transmit(server: WebSocket, mut receiver: mpsc::Receiver<Data>) -> Result<(), Box<dyn Error>> {
+pub async fn transmit(
+    server: WebSocket,
+    mut receiver: mpsc::Receiver<Data>,
+) -> Result<(), Box<dyn Error>> {
     let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(300));
     let mut buffer = Vec::new();
     loop {

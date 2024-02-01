@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use clap::Parser;
 use futures::stream::StreamExt;
 use libp2p::multiaddr::Protocol;
@@ -15,7 +16,6 @@ use std::time::Duration;
 use tokio::{io, select, time};
 use tracing_subscriber::EnvFilter;
 use warp::Filter;
-use chrono::{DateTime, Utc};
 use ws::{channel, server};
 mod ws;
 
@@ -57,7 +57,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let (sender, receiver) = tokio::sync::mpsc::channel(100);
-    if let Some(address) = opt.offer_webhook.clone() {
+    if let Some(address) = opt.offer_websocket.clone() {
         let server = server::WebSocket::run(&address).await;
 
         tokio::spawn(async {
@@ -232,14 +232,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             });
                         }
-                        if let Some(ref _address) = opt.offer_webhook.clone() {
+                        if let Some(ref _address) = opt.offer_websocket.clone() {
                             let now: DateTime<Utc> = Utc::now();
                             let ws_data = ws::channel::Data {
                                         offer: ws_str.clone(),
                                         ts: now.format("%Y-%m-%d %H:%M:%S").to_string(),
                             };
                                 if let Err(e) = sender.send(ws_data).await {
-                                    eprintln!("Error transmitting to offer webhook address: {}", e);
+                                    eprintln!("Error transmitting offer through websocket: {}", e);
                                 }
                         };
                     }
@@ -335,5 +335,5 @@ struct Opt {
         help = "Start a Websocket server to transmit offers",
         value_name = "HOST:PORT"
     )]
-    offer_webhook: Option<String>,
+    offer_websocket: Option<String>,
 }
