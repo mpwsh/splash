@@ -12,15 +12,15 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::{io, select, time};
 mod dns;
 
-const MAX_OFFER_SIZE: usize = 300 * 1024;
+const MAX_MESSAGE_SIZE: usize = 300 * 1024;
 
 #[derive(Error, Debug)]
 pub enum SplashError {
-    #[error("Offer exceeds maximum size of {0} bytes")]
-    OfferTooLarge(usize),
-    #[error("Invalid offer format: not a valid bech32 string")]
-    InvalidOfferFormat,
-    #[error("Failed to send offer to network")]
+    #[error("Message exceeds maximum size of {0} bytes")]
+    MessageTooLarge(usize),
+    #[error("Invalid message format: not a valid bech32 string")]
+    InvalidMessageFormat,
+    #[error("Failed to send message to network")]
     SendError,
 }
 
@@ -28,10 +28,10 @@ pub enum SplashEvent {
     Initialized(PeerId),
     PeerConnected(PeerId),
     PeerDisconnected(PeerId),
-    OfferReceived(String),
+    MessageReceived(String),
     NewListenAddress(Multiaddr),
-    OfferBroadcasted(String),
-    OfferBroadcastFailed(gossipsub::PublishError),
+    MessageBroadcasted(String),
+    MessageBroadcastFailed(gossipsub::PublishError),
 }
 
 pub struct Splash {
@@ -68,6 +68,12 @@ struct SplashBehaviour {
     identify: identify::Behaviour,
 }
 
+impl Default for Splash {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Splash {
     pub fn new() -> Splash {
         let (submission_sender, submission_receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(100);
@@ -82,25 +88,26 @@ impl Splash {
         }
     }
 
-    pub fn validate_offer(offer: &str) -> Result<(), SplashError> {
-        if offer.len() > MAX_OFFER_SIZE {
-            return Err(SplashError::OfferTooLarge(MAX_OFFER_SIZE));
+    pub fn validate_message(message: &str) -> Result<(), SplashError> {
+        if message.len() > MAX_MESSAGE_SIZE {
+            return Err(SplashError::MessageTooLarge(MAX_MESSAGE_SIZE));
         }
 
-        if !offer.starts_with("offer1") || bech32::decode(offer).is_err() {
-            return Err(SplashError::InvalidOfferFormat);
+        /*
+        if !message.starts_with("message1") || bech32::decode(message).is_err() {
+            return Err(SplashError::InvalidMessageFormat);
         }
-
+        */
         // TODO: more validations?
 
         Ok(())
     }
 
-    pub async fn broadcast_offer(&self, offer: &str) -> Result<(), SplashError> {
-        Splash::validate_offer(offer)?;
+    pub async fn broadcast_message(&self, message: &str) -> Result<(), SplashError> {
+        Splash::validate_message(message)?;
 
         self.submission
-            .send(offer.as_bytes().to_vec())
+            .send(message.as_bytes().to_vec())
             .await
             .map_err(|_| SplashError::SendError)?;
 
@@ -146,7 +153,7 @@ impl Splash {
             )?
             .with_behaviour(|key| {
                 // We can take the hash of message and use it as an ID.
-                let unique_offer_fn = |message: &gossipsub::Message| {
+                let unique_message_fn = |message: &gossipsub::Message| {
                     let mut s = DefaultHasher::new();
                     message.data.hash(&mut s);
                     gossipsub::MessageId::from(s.finish().to_string())
@@ -155,8 +162,8 @@ impl Splash {
                 // Set a custom gossipsub configuration
                 let gossipsub_config = gossipsub::ConfigBuilder::default()
                     .heartbeat_interval(Duration::from_secs(5)) // This is set to aid debugging by not cluttering the log space
-                    .message_id_fn(unique_offer_fn) // No duplicate offers will be propagated.
-                    .max_transmit_size(MAX_OFFER_SIZE)
+                    .message_id_fn(unique_message_fn) // No duplicate messages will be propagated.
+                    .max_transmit_size(MAX_MESSAGE_SIZE)
                     .validate_messages()
                     .validation_mode(gossipsub::ValidationMode::Permissive)
                     .build()
@@ -221,7 +228,7 @@ impl Splash {
         }
 
         // Create a Gossipsub topic
-        let topic = gossipsub::IdentTopic::new(format!("/{}/offers/1", self.network_name));
+        let topic = gossipsub::IdentTopic::new(format!("/{}/messages/1", self.network_name));
 
         // subscribes to our topic
         swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
@@ -243,13 +250,13 @@ impl Splash {
         tokio::spawn(async move {
             loop {
                 select! {
-                    Some(offer) = submission_receiver.recv() => {
+                    Some(message) = submission_receiver.recv() => {
 
-                        if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic.clone(), offer.clone()) {
-                            event_tx.send(SplashEvent::OfferBroadcastFailed(e)).await.ok();
+                        if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic.clone(), message.clone()) {
+                            event_tx.send(SplashEvent::MessageBroadcastFailed(e)).await.ok();
                         }
 
-                        event_tx.send(SplashEvent::OfferBroadcasted(String::from_utf8_lossy(&offer).to_string())).await.ok();
+                        event_tx.send(SplashEvent::MessageBroadcasted(String::from_utf8_lossy(&message).to_string())).await.ok();
                     },
                     _ = peer_discovery_interval.tick() => {
                         swarm.behaviour_mut().kademlia.get_closest_peers(PeerId::random());
@@ -268,13 +275,13 @@ impl Splash {
                         })) => {
                             let msg_str = String::from_utf8_lossy(&message.data).into_owned();
 
-                            match Splash::validate_offer(&msg_str) {
+                            match Splash::validate_message(&msg_str) {
                                 Ok(_) => {
-                                    event_tx.send(SplashEvent::OfferReceived(msg_str)).await.ok();
+                                    event_tx.send(SplashEvent::MessageReceived(msg_str)).await.ok();
                                     swarm.behaviour_mut().gossipsub.report_message_validation_result(&message_id, &propagation_source, MessageAcceptance::Accept).ok();
                                 }
                                 Err(e) => {
-                                    warn!("Received invalid offer: {}", e);
+                                    warn!("Received invalid message: {}", e);
                                     swarm.behaviour_mut().gossipsub.report_message_validation_result(&message_id, &propagation_source, MessageAcceptance::Reject).ok();
                                 }
                             }

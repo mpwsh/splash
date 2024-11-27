@@ -10,7 +10,7 @@ pub async fn resolve_peers_from_dns(network_name: String) -> Result<Vec<Multiadd
 
     let resolver = TokioAsyncResolver::tokio(config, opts);
     let records = resolver
-        .txt_lookup(format!("_dnsaddr.{}.dexie.space.", network_name))
+        .txt_lookup(format!("_dnsaddr.{}.mpw.sh.", network_name))
         .await?;
 
     let peers: Vec<Multiaddr> = records

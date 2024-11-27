@@ -1,5 +1,4 @@
 use clap::Parser;
-use env_logger;
 use libp2p::identity;
 use libp2p::Multiaddr;
 use serde_json::json;
@@ -41,16 +40,16 @@ struct Opt {
 
     #[clap(
         long,
-        help = "HTTP endpoint where incoming offers are posted to, sends JSON body {\"offer\":\"offer1...\"} (defaults to STDOUT)"
+        help = "HTTP endpoint where incoming messages are posted to, sends JSON body {\"message\":\"offer1...\"} (defaults to STDOUT)"
     )]
-    offer_hook: Option<String>,
+    message_hook: Option<String>,
 
     #[clap(
         long,
-        help = "Start a HTTP API for offer submission, expects JSON body {\"offer\":\"offer1...\"}",
+        help = "Start a HTTP API for message submission, expects JSON body {\"message\":\"offer1...\"}",
         value_name = "HOST:PORT"
     )]
-    listen_offer_submission: Option<String>,
+    listen_message_submission: Option<String>,
 
     #[clap(long, help = "Start a HTTP API for metrics", value_name = "HOST:PORT")]
     listen_metrics: Option<String>,
@@ -88,38 +87,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let metrics = metrics::Metrics::new();
 
-    // Start a local webserver for offer submission, only if --listen-offer-submission is specified
-    if let Some(offer_submission_addr_str) = opt.listen_offer_submission {
-        let offer_route =
+    // Start a local webserver for message submission, only if --listen-message-submission is specified
+    if let Some(message_submission_addr_str) = opt.listen_message_submission {
+        let message_route =
             warp::post()
                 .and(warp::body::json())
-                .and_then(move |offer: serde_json::Value| {
+                .and_then(move |message: serde_json::Value| {
                     let node = node.clone();
                     async move {
-                        let response =
-                            if let Some(offer_str) = offer.get("offer").and_then(|v| v.as_str()) {
-                                match node.broadcast_offer(offer_str).await {
-                                    Ok(_) => warp::reply::json(&json!({"success": true})),
-                                    Err(e) => warp::reply::json(&json!({
-                                        "success": false,
-                                        "error": e.to_string(),
-                                    })),
-                                }
-                            } else {
-                                warp::reply::json(&json!({
+                        let response = if let Some(message_str) =
+                            message.get("offer").and_then(|v| v.as_str())
+                        {
+                            match node.broadcast_message(message_str).await {
+                                Ok(_) => warp::reply::json(&json!({"success": true})),
+                                Err(e) => warp::reply::json(&json!({
                                     "success": false,
-                                    "error": "Invalid offer format",
-                                }))
-                            };
+                                    "error": e.to_string(),
+                                })),
+                            }
+                        } else {
+                            warp::reply::json(&json!({
+                                "success": false,
+                                "error": "Invalid message format",
+                            }))
+                        };
 
                         Ok::<_, warp::Rejection>(warp::reply::with_status(response, StatusCode::OK))
                     }
                 });
 
-        let submission_addr: SocketAddr = offer_submission_addr_str.parse()?;
+        let submission_addr: SocketAddr = message_submission_addr_str.parse()?;
 
         tokio::spawn(async move {
-            warp::serve(offer_route).run(submission_addr).await;
+            warp::serve(message_route).run(submission_addr).await;
         });
     }
 
@@ -155,24 +155,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Disconnected from peer: {} (peers: {})", peer_id, peers);
             }
 
-            SplashEvent::OfferBroadcasted(offer) => {
-                println!("Broadcasted Offer: {}", offer);
-                metrics.increment_offers_broadcasted();
+            SplashEvent::MessageBroadcasted(message) => {
+                println!("Broadcasted Message: {}", message);
+                metrics.increment_messages_broadcasted();
             }
 
-            SplashEvent::OfferBroadcastFailed(err) => {
-                println!("Broadcasting Offer failed: {}", err)
+            SplashEvent::MessageBroadcastFailed(err) => {
+                println!("Broadcasting Message failed: {}", err)
             }
 
-            SplashEvent::OfferReceived(offer) => {
-                println!("Received Offer: {}", offer);
-                metrics.increment_offers_received();
+            SplashEvent::MessageReceived(message) => {
+                println!("Received Message: {}", message);
+                metrics.increment_messages_received();
 
-                if let Some(ref endpoint_url) = opt.offer_hook {
+                if let Some(ref endpoint_url) = opt.message_hook {
                     let endpoint_url_clone = endpoint_url.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = utils::offer_post_hook(&endpoint_url_clone, &offer).await {
-                            eprintln!("Error posting to offer hook: {}", e);
+                        if let Err(e) =
+                            utils::message_post_hook(&endpoint_url_clone, &message).await
+                        {
+                            eprintln!("Error posting to message hook: {}", e);
                         }
                     });
                 }

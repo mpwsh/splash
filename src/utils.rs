@@ -20,11 +20,11 @@ pub fn save_keypair_to_file(keypair: &identity::Keypair, file_path: &str) -> io:
     Ok(())
 }
 
-pub async fn offer_post_hook(endpoint: &str, offer: &str) -> Result<(), reqwest::Error> {
+pub async fn message_post_hook(endpoint: &str, offer: &str) -> Result<(), reqwest::Error> {
     let client = reqwest::Client::new();
 
-    let offer_json = json!({ "offer": offer });
-    client.post(endpoint).json(&offer_json).send().await?;
+    let message_json = json!({ "offer": offer });
+    client.post(endpoint).json(&message_json).send().await?;
 
     Ok(())
 }
