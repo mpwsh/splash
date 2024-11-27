@@ -34,6 +34,11 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream, peers: PeerMap) 
     while let Some(msg) = rx.next().await {
         let msg = msg?;
         if msg.is_text() || msg.is_binary() {
+            eprintln!(
+                "Received text message from {}: {}",
+                peer,
+                msg.to_text().unwrap_or_default()
+            );
             // Echo the message back to the client
             for peer in peers.lock().await.iter_mut() {
                 peer.send(msg.clone()).await?;

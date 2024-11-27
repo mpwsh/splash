@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use clap::Parser;
 use futures::stream::StreamExt;
 use libp2p::multiaddr::Protocol;
@@ -56,14 +56,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let (sender, receiver) = tokio::sync::mpsc::channel(100);
-    if let Some(address) = opt.offer_websocket.clone() {
-        let server = server::WebSocket::run(&address).await;
-
-        tokio::spawn(async {
-            channel::transmit(server, receiver).await.unwrap();
-        });
-    }
     let mut swarm = libp2p::SwarmBuilder::with_existing_identity(id_keys)
         .with_tokio()
         .with_tcp(
@@ -180,6 +172,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
             },
         );
 
+    // Start the websocket server using the address provided in the `offer_websocket` option.
+    let (ws_tx, ws_rx) = tokio::sync::mpsc::channel(100);
+    if let Some(address) = opt.offer_websocket.clone() {
+        let server = server::WebSocket::run(&address).await;
+
+        tokio::spawn(async {
+            channel::transmit(server, ws_rx).await.unwrap();
+        });
+    }
     // Start the warp server using the address provided in the `listen_offer_submission` option.
     if let Some(submission_addr_str) = opt.listen_offer_submission {
         let submission_addr: SocketAddr =
@@ -233,14 +234,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             });
                         }
                         if let Some(ref _address) = opt.offer_websocket.clone() {
-                            let now: DateTime<Utc> = Utc::now();
                             let ws_data = ws::channel::Data {
                                         offer: ws_str.clone(),
-                                        ts: now.format("%Y-%m-%d %H:%M:%S").to_string(),
+                                        ts: Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
                             };
-                                if let Err(e) = sender.send(ws_data).await {
-                                    eprintln!("Error transmitting offer through websocket: {}", e);
-                                }
+                            if let Err(e) = ws_tx.send(ws_data).await {
+                                eprintln!("Error transmitting offer through websocket: {}", e);
+                            }
                         };
                     }
                 },
